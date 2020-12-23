@@ -1,0 +1,381 @@
+---
+title: "Final Poster Project"
+author: "Shimmy Nauenberg"
+subtitle: Population Density And Temperature Used To Predict Autothefts
+output:
+  ioslides_presentation:
+    incremental: yes
+    smaller: yes
+    widescreen: yes
+  beamer_presentation:
+    incremental: yes
+  slidy_presentation:
+    incremental: yes
+---
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning = FALSE)
+# echo=FALSE will stop the code chunk from appearing in the knit document
+# warning=FALSE and message=FALSE will stop R messages from appearing in the knit document
+library(tidyverse)
+library(broom)
+auto_thefts <- read.csv("auto_thefts.csv")
+weather_2014_2016 <- read_csv("weather_2014_2016_1.csv")
+weather_2017_2018 <- read_csv("weather_2017_2018_1.csv")
+neigh_prof <- read.csv("neighbourhood_profiles_2016.csv")
+
+joined <- left_join(x = auto_thefts, y = neigh_prof, by = "Hood_ID") # joining the data frames of autothefts and neigh_prof
+
+n <- nrow(joined)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+test <-joined %>% group_by(Hood_ID) %>% summarise(num_theft = n())
+
+test2 <-joined %>% select(Hood_ID, pop_density_per_square_km) %>% unique()
+
+
+
+
+full_weather <- rbind(weather_2014_2016, weather_2017_2018)
+#the weather data frames had to many observation to download as onefile to combining them into a single data frame
+
+auto_thefts_new_date <- auto_thefts %>% mutate(DATE = as.Date(substr(occurrencedate, 0 , 10))) # in order to joing the data frames the types need to be the same so this is just ensure that the types are identical
+
+full_with_weather <- left_join(x= auto_thefts_new_date, y= full_weather, by = "DATE")
+all <- left_join(x = full_with_weather, y = neigh_prof, by = "Hood_ID")
+# all the dataframes as a single data frame
+
+
+weather <- full_weather %>% filter(!is.na(TAVG))
+# removing the na values in tavg so that we can calculade the quantiles
+
+#Uncomment the following to see quantile weather information. (Is commented so it doesnt show on isoslides)
+#quantile(weather$TAVG)
+
+
+#taking the 25 percentile and the 75 percentile we end up with the the temps that have the 25 perecentile of coldest, and 25 percentile of hottest
+
+all <- all %>% mutate(temp_type = ifelse(TAVG >= 19.275, "hot", TAVG), temp_type = ifelse(TAVG <= 1.600, "cold", temp_type))
+
+# creating a hot and cold variable for observations in all. if they are not hot or cold, we are not using them, so they just appear as TAVG in the temp_type variable
+
+
+
+## --------the number of days that where catagorized as hot and cold for our data frame ##
+cold<- weather %>% filter(TAVG <= 1.600) %>% summarise(number_of_days_cold = n())
+hot <- weather %>% filter(TAVG >= 19.275) %>% summarise(number_of_days_hot = n())
+# this shows that there where nearly identical number of days that where hot and that where cold in our weather data. 
+# data frame of all observations that are catagorized as hot or cold
+all_just_temp <- all %>% filter(temp_type == "cold" | temp_type == "hot")
+# this shows that there where nearly identical number of days that where hot and that where cold in our weather data. 
+
+
+cold_thefts <-all_just_temp %>%filter(temp_type == "cold")%>% group_by(pop_density_per_square_km) %>% summarise(number_of_thefts = n()) %>% mutate(temp_type = "cold")
+
+hot_thefts <- all_just_temp %>%filter(temp_type == "hot")%>% group_by(pop_density_per_square_km) %>% summarise(number_of_thefts = n()) %>% mutate(temp_type = "hot")
+
+thefts_pdense_and_weather <- rbind(cold_thefts, hot_thefts)
+
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+set.seed(2)
+n <- nrow(thefts_pdense_and_weather)
+training_indices <- sample(1:n, size=round(0.8*n))
+train <- thefts_pdense_and_weather[training_indices,]
+y_train <- train$number_of_thefts
+
+ # Testing dataset includes all observations NOT in the training data
+ test <- thefts_pdense_and_weather[-training_indices,]
+y_test <- test$number_of_thefts
+
+# Fit models to training data
+ modA_train <- lm(number_of_thefts ~ pop_density_per_square_km, data=train)
+ modB_train <- lm(number_of_thefts ~ temp_type, data=train)
+modC_train <- lm(number_of_thefts~ temp_type + pop_density_per_square_km, data=train)
+ modD_train <- lm(number_of_thefts~ temp_type * pop_density_per_square_km, data=train)
+
+ # Make predictions for testing data using training model
+ yhat_modA_test <- predict(modA_train, newdata = test)
+yhat_modB_test <- predict(modB_train, newdata = test)
+ yhat_modC_test <- predict(modC_train, newdata = test)
+ yhat_modD_test <- predict(modD_train, newdata = test)
+
+ # Make predictions for training data using training model
+ yhat_modA_train <- predict(modA_train, newdata = train)
+ yhat_modB_train <- predict(modB_train, newdata = train)
+ yhat_modC_train <- predict(modC_train, newdata = train)
+ yhat_modD_train <- predict(modD_train, newdata = train)
+
+ # Calculate RMSE for testing data
+ modA_test_RMSE <- sqrt(sum((y_test - yhat_modA_test)^2) / nrow(test))
+ modB_test_RMSE <- sqrt(sum((y_test - yhat_modB_test)^2) / nrow(test))
+ modC_test_RMSE <- sqrt(sum((y_test - yhat_modC_test)^2) / nrow(test))
+ modD_test_RMSE <- sqrt(sum((y_test - yhat_modD_test)^2) / nrow(test))
+
+ # Calculate RMSE for training data
+ modA_train_RMSE <- sqrt(sum((y_train - yhat_modA_train)^2) / nrow(train))
+ modB_train_RMSE <- sqrt(sum((y_train - yhat_modB_train)^2) / nrow(train))
+ modC_train_RMSE <- sqrt(sum((y_train - yhat_modC_train)^2) / nrow(train))
+ modD_train_RMSE <- sqrt(sum((y_train - yhat_modD_train)^2) / nrow(train))
+
+```
+
+
+## Introduction 
+
+According to Toronto Police Services, over 18 000 vehicles were stolen in the city of Toronto between 2014-2018. We wanted to identify trends in the auto_thefts dataset (provided by TPS) that can be used to prevent/combat auto theft in Toronto in the future. We also incorporated weather data that we obtained from the National Centers for Enviromental Information. We were specifically interested in factors such as population density and weather and how they contribute to the likelihood of autothefts. 
+
+Since, this dataset contains about 18, 000 observations, we had to find an efficient way to process the data. The data science techniques and statistical methods we learned in this course were especially usefull to make visualizations and models that allowed us to extract information from the data in an easy-to-follow format. 
+
+### Research Question:
+
+What is the relationship between population density and the number of auto thefts in Toronto? Does this relationship change by temperature?
+
+## Data Summary 
+
+### Merging and Creating New Datasets:
+1. full_weather: join datasets for 2014-2016 and 2017-2018 and removed observation observations with missing TAVG (Average Temperature)
+2. full_with_weather: merged the auto_thefts dataframe with the weather dataframe. (By data, Left join, to ensure each autotheft observation remained) 
+3. all: merged full_with_weather and neigh_prof into a single data frame(By Hood Id, to ensure each autotheft obervation remained) 
+4. all_just_temp: The all data frame with just observations that are catagorized as hot or cold
+5. thefts_pdense_and_weather: contains pop density, number of thefts, and temp_type for hot and cold observations only
+
+---
+### Creating new variables:
+
+1. Created “num_thefts” variable in theft_pdense_and_weather by grouping observations from all_just_temp by pop_tense_per_square_km and summarisng the total number of observations in each pop_dense_per_square_km. 
+2. Created a “temp_type” variable in “all” dataframe by mutating TAVG (average temperature) by categorizing the top 25% temperatures (3rd quantile) as “hot” and the bottom 25% (1st quantile) as “cold”
+3. Note: for our purposes we removed observations that were neither hot nor cold, and therefore they where not part of our analysis.
+
+## Statistical Methods
+
+1. Summary tables: selected 15 observations with the highest and lowest number of autothefts alongside the temperature category and Population Density Per Square Km
+2. Histogram and Scatter Plot: visualize relationship between population density vs. frequency of autothefts 
+3. Histograms : visualize relationship population density vs. number of autothefts
+4. TAVG Histogram: visualize the frequency of average temperatures over the 4 year period
+5. Test Statistic: calculated by summarizing the total number of thefts that happened during “cold” weather and dividing by the total number of thefts that happened on “hot” or “cold” days (all_just_temp dataframe)
+6. Null and Alternative hypotheseses: predict the the proportion of autothefts that happen during “cold” temperature,
+7. Simulations: simulate 10 000 new hypothetical samples based on the assumption that our null hypothesis is true
+8. P-value: see how extreme our test statistic is and whether to reject the null hypothesis
+
+## Statistical Methods (continued...)
+9 Various linear regression models (both complex and simple) with population density and/or  average temperature as predictors of autothefts: 
+- Just_pdense: simple linear regression model (only population density)
+- Just_temp: simple linear regression model (only average temperature)
+- Addtion: complex linear regression (without interaction)
+- Interaction: complex linear regression (interaction)
+
+10 RMSE tables: compare predictive performance of models 
+
+11 Equation with coefficients for linear regression model with best performance
+
+
+## Summary Table For Bottom 15 Number of Thefts Observations
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+head <- thefts_pdense_and_weather %>%arrange(number_of_thefts) %>% head(15)
+head
+
+```
+
+
+## Summary Table For Top 15 Number of Thefts Observations
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+head2 <- thefts_pdense_and_weather %>% arrange(number_of_thefts) %>% tail(15) 
+head2
+```
+
+## Histogram for Number of thefts vs Population Density for All Observations
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+
+all_just_temp %>% ggplot(aes(x = pop_density_per_square_km))+ geom_histogram() + ggtitle("Number of Thefts In Each Population Density") + xlab("Population Density Per Square Km") + ylab("Number Of Thefts")
+```
+
+The histogram comparing population density to the frequency of autothefts for each observation is heavily right-skewed towards higher population densities. 
+
+## Scatter Plot for Number of thefts vs. Population density
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+
+thefts_pdense_and_weather %>% ggplot(aes(x = pop_density_per_square_km,  y = number_of_thefts)) + geom_point() + ggtitle("Scatterplot Of Number Of Thefts Based on Population Density Per Sqaure Km") + ylab("Number Of Thefts") + xlab("Population Density Per Square Km")
+```
+
+The scatter plot shows the association between population density and number of autothefts as strong, negative, and linear.  
+ 
+## Histogram of Number of Thefts For Each Average Temperature
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+all %>% ggplot(aes(x = TAVG)) + geom_histogram() + geom_vline(xintercept =2.0) + geom_vline(xintercept = 19.6) + ggtitle("Number Of Days From 2014 To 2016 That Where A Given Average Temperature") + xlab("Average Temperature") + ylab("Number of Days")
+```
+
+The histogram is bimodal and slightly left-skewed towards lower temperatures. The vertical lines represent the thresholds for the top 25% and bottom 25% of temperatures. The modes of the histogram appear around these thresholds. 
+
+## Simulation for Average temperature
+
+$H_0$ = $p_{cold} = 0.5$ 
+$H_A$ = $p_{cold} \neq 0.5$
+
+$\hat{p} = 0.470293$
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+all_just_temp <- all %>% filter(temp_type == "cold" | temp_type == "hot")
+
+test_stat <- all_just_temp %>% summarise(p_hat = sum(temp_type == "cold")/n())
+test_stat <- as.numeric(test_stat)
+#test_stat
+set.seed(1234)
+n = all_just_temp %>% summarise(n())
+n = as.numeric(n)
+#n
+repetitions = 10000
+sim <- rep(NA, repetitions)
+for(i in 1:repetitions) { 
+  
+  new_sim <- sample(c("hot","cold"), size=n, replace=TRUE) 
+  sim_p <- sum(new_sim == "cold")/n
+  sim [i] <- sim_p
+} 
+sim <- data_frame(p_cold = sim)
+sim %>% ggplot(aes(x = p_cold)) + geom_histogram(binwidth = 0.001, colour = "black", fill = "grey") + labs(x = "Proportion Thefts That Where Cold in 8567 Thefts") + geom_vline(xintercept = test_stat) + geom_vline(xintercept = 0.5 + (0.5-test_stat)) + ggtitle("Distribution Of Number Of Thefts That Had Cold Temperature,\n Based On The Null Hypothesis") + ylab("Number Of Thefts")
+```
+
+This simulation was conducted under the assumption that the proportion of autothefts should be the same between "hot" and "cold" temperatures. This simulation has generated 10 000 hypothetical samples and appears to have a normal distribution that is centered at 0.5. 
+
+
+## P-value for Simulation
+ 
+The P_value is:
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+p <- sim %>% filter(p_cold <= test_stat | p_cold>= 0.5 + (0.5-test_stat)) %>% 
+                 summarise(p_value = n() / repetitions) %>% as.numeric()
+p
+
+```
+None of the samples generated by the simulation are as extreme as the test statistic $\hat{p} = 0.470293$. Therefore the p-value is 0. 
+
+## Histogram grouped by hot and cold weather
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+all_just_temp %>% ggplot(aes(x= pop_density_per_square_km)) + geom_histogram() + facet_wrap(~temp_type) + ggtitle("Number Of Thefts In Each Population Density Catagorized As Hot Or Cold") + xlab("Population Density Per Square Km") + ylab("Number Of Thefts")
+
+```
+
+Both histograms for "hot" and "cold" temperatures appear to be heavily right-skewed with majority of observations towards lower population densities just like the histogram for all observations. The total heights of the bars for the "hot" temperature histogram appear to higher, suggesting that the number of thefts is higher for hotter temperatures, which is confirmed by the summary table.
+
+## Summary table
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3}
+all_just_temp %>% group_by(temp_type) %>% summarise(number_of_thefts = n())
+
+```
+This summary table shows that the frequency of autothefts is higher for "hot" temperatures. 
+
+## Simple Linear Regression Model For Pop density as a Predictor For the # of Autothefts 
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4}
+mod_just_p_dense <- lm(number_of_thefts ~ pop_density_per_square_km, data = thefts_pdense_and_weather)
+
+thefts_pdense_and_weather %>% ggplot(aes( x = pop_density_per_square_km, y = number_of_thefts)) + geom_point() + geom_smooth(method="lm", se=FALSE) + theme_minimal() + ggtitle("Number Of Thefts Based On Population Density Per Square Km") + xlab("Population Density Per Square Km") + ylab("Number Of Thefts")
+```
+
+The line on the scatter plot is an estimated regression line.  
+
+## Simple Linear Regression Model For Temp Type as a Predictor For the # of Autothefts  
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+thefts_pdense_and_weather %>% ggplot(aes( x = temp_type, y = number_of_thefts)) + geom_point() + ggtitle("# of thefts In Each Observation In thefts_pdense_and_weather\n Categorized As Hot Or Cold") + xlab("Temperature Type") + ylab("Number Of Thefts")
+```
+
+
+## Complex Linear Regression Model For Pop density and Temp Types as Predictors For the # of Autothefts (No Interaction)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3.5}
+mod_addition <- lm(number_of_thefts ~ temp_type + pop_density_per_square_km, data = thefts_pdense_and_weather)
+
+thefts_pdense_and_weather %>% ggplot(aes(x=pop_density_per_square_km, y=number_of_thefts, color=temp_type)) +
+ geom_point(alpha=0.5) +
+ geom_line(data=augment(mod_addition),
+ aes(y=.fitted, colour=temp_type), lwd=1.5)  +
+  ggtitle("# Of Thefts Based On The Addition Of Pop Density Per Sq Km And Temp Type") + ylab("Number Of Thefts") + xlab("Population Density Per Square Km")
+```
+
+"Hot" temperatures have a higher intercept. Both fitted regression lines for "hot" and "cold" temperatures are parallel. 
+
+## Complex Linear Regression Model For Pop density and Temp Types as Predictors For the # of Autothefts (With Interaction)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3.5}
+interaction_model <- lm(number_of_thefts ~ temp_type * pop_density_per_square_km, data =thefts_pdense_and_weather)
+
+thefts_pdense_and_weather %>% ggplot(aes(x=pop_density_per_square_km, y=number_of_thefts, color=temp_type)) +
+ geom_point(alpha=0.5) + geom_smooth(method="lm", se=FALSE) + ggtitle("# Of Thefts Based On The Interaction Of Pop Density Per Sq Km\n And Temp Type") + ylab("Number Of Thefts") + xlab("Population Density Per Square Km")
+```
+
+The fitted regression lines for "hot" and "cold" temperatures are not parallel. However the difference in slopes and intercepts is very minimal. 
+
+## RMSE Data table
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+data_frame(Model=c("just_p_dense","just_temp","addition","interaction"),
+ RMSE_testdata = c(modA_test_RMSE, modB_test_RMSE,
+ modC_test_RMSE, modD_test_RMSE),
+ RMSE_traindata = c(modA_train_RMSE, modB_train_RMSE,
+ modC_train_RMSE, modD_train_RMSE),
+ratio_of_RMSEs = RMSE_traindata / RMSE_testdata)
+```
+The "addition" model, which is the complex linear regression model for population density and temperature type as predictors of the number of autothefts, has the lowest RMSE's (prediction errors) for testing and training datasets. The "addition" model also has ratio of RSME's closest to 1, which is an indicator of the best predictive performance. 
+
+## The "Best" Model:
+
+### Model to determine number of thefts based on the addition of predictors temp_type and pop_density_per_square_km 
+
+
+$$\hat{y}_i = \hat{\beta}_0 + \hat{\beta}_1 x_i +\ \hat{\beta}_2 x_2i$$
+$$NumTheft = 38.940588460 + 3.688405797x_i-0.001550114 \times popdensity$$
+$$where\space x_i = 1\space when\space temp\space type\space is\space "hot" $$
+      $$x_i = 0\space when\space temp\space type\space is\space "cold" $$
+      
+and popdensity represents the population density per square km
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary(mod_addition)$coefficients
+
+```
+
+## Brief Summary of Results
+
+- All of the scatterplots show a downward trend, suggesting that there is a negative and linear association between population density and the number of autothefts. 
+
+- The histograms, regardless of whether they are grouped by temperature type, are also right-skewed towards higher population densities, which suggeests that autothefts are higher in lower population density neighbourhoods. 
+
+- The total heights of the bars of the histogram for "hot" temperatures is higher than the histogram for "cold" temperatures, and the summary tables also show that there is higher frequency of autothefts during "hot" temperature days. However the difference is small. 
+
+- The simulations we conducted under our null hypothesis that the proportion of autothefts for "hot" and "cold" temperature days, returned a p-value of 0. 
+
+- Out of all of our models, the complex linear regression model "addition", had the lowest RSMEs and ratio of RMSEs between training and testing datasets that were the closest to 1. 
+
+
+## Conclusion
+
+### Relationship between population density and number of autothefts?
+
+- We can definitely conclude that lower population densities are associated with higher frequencies of autothefts by refering back to our histograms, scatter plots, and negative slopes of our linear regression models.
+
+### Does weather change this relationship?
+
+- Since the p-value = 0, we can reject our null hypothesis that there is no difference in proportions of autothefts is the same for "hot" and "cold" temperature days. So there is a difference in proportions of autothefts based on hot and cold temperature days.
+
+- Our best performing model at predicting number of autothefts, "addition", was a complex linear regression model with two predictors: population density per square km and temperature type. This model assumed that the two predictors did not interact. The line for "hot" temperatures had a higher intercept. 
+
+-Therefore we can conclude that weather does change but affects the relationship between population density and number of autothefts. 
+
+## Limitations
+
+- Our best model has a predictive accuracy of only 63.2 percent.
+- Our models do not have the same variation of Y for every X, therefore it would seem that they would be best at predicting for low values of x. 
+- We have not taken other factors such as socio-economic data into consideration. 
+- We are unsure if the relationship between lower population densities and a higher number of autothefts are related to less supervision in 
+lower population density areas. 
+- we assumed that each neighbourhood had about the same population. 
+- possible confounders include time of year, precipitation, snow on ground, more houses in lower population density per square km. 
+- We removed values that where not at the extreme temperatures of hot and cold.
+
+
+
